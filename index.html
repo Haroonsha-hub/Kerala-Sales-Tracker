@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kerala Unit Sales Tracker</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Barlow+Condensed:ital,wght@1,700;1,800&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>:root{color-scheme:light}body{margin:0}</style>
+</head>
+<body>
+<style>
+  /* Layout: one tracker. Upload and plan controls on top, Kerala total strip, then one row per unit (ASM). */
+  :root {
+    --bg: #f3f5f8;
+    --surface: #ffffff;
+    --surface-2: #eef1f6;
+    --fg: #0b1b3f;
+    --muted: #5c6a86;
+    --line: #dde3ee;
+    --navy: #0a1f4c;
+    --on-navy: #ffffff;
+    --amber: #f2a900;
+    --teal: #12876f;
+    --good: #0f7a3d;
+    --good-bg: #dff3e6;
+    --warn: #9a6200;
+    --warn-bg: #fdf0cf;
+    --bad: #c4162a;
+    --bad-bg: #fde3e6;
+    --f-display: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    --f-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0a1226; --surface: #111c38; --surface-2: #17254a; --fg: #e8eefc; --muted: #93a2c4;
+      --line: #25345c; --navy: #0d2150; --on-navy: #ffffff; --amber: #f5b82e; --teal: #3bc3a3;
+      --good: #5fd48e; --good-bg: #123a27; --warn: #f2c35b; --warn-bg: #3d3010; --bad: #ff7b8a; --bad-bg: #4a1620;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a1226; --surface: #111c38; --surface-2: #17254a; --fg: #e8eefc; --muted: #93a2c4;
+    --line: #25345c; --navy: #0d2150; --on-navy: #ffffff; --amber: #f5b82e; --teal: #3bc3a3;
+    --good: #5fd48e; --good-bg: #123a27; --warn: #f2c35b; --warn-bg: #3d3010; --bad: #ff7b8a; --bad-bg: #4a1620;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 15px; line-height: 1.45; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 40px; display: grid; gap: 18px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 20px; }
+  .brand { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  h1 { margin: 2px 0 0; font-family: var(--f-display); font-style: italic; font-weight: 800; font-size: clamp(34px, 7vw, 52px); line-height: 1; letter-spacing: .01em; text-transform: uppercase; text-wrap: balance; }
+  h1 span { color: var(--teal); }
+  .asof { font-size: 13px; color: var(--muted); text-align: right; }
+  .asof strong { color: var(--fg); font-weight: 600; }
+
+  .controls { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 14px; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+  @media (max-width: 720px) { .controls { grid-template-columns: minmax(0, 1fr); } }
+  .drops { display: grid; gap: 10px; min-width: 0; }
+  .drop { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); border: 2px dashed var(--line); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 4px; justify-content: center; cursor: pointer; background: var(--surface-2); transition: border-color .15s, background .15s; min-width: 0; }
+  .drop:hover, .drop.over, .drop:focus-within { border-color: var(--teal); }
+  .drop b { font-weight: 600; }
+  .drop small { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; min-width: 0; }
+  label { display: grid; gap: 4px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; min-width: 0; }
+  input[type="date"], input[type="number"], input[type="text"], input[type="time"] { font: inherit; font-size: 15px; letter-spacing: 0; text-transform: none; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; min-width: 0; }
+  input:focus-visible, .drop:focus-within { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .hint { grid-column: 1 / -1; font-size: 13px; color: var(--muted); margin: 0; }
+
+  .strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--navy); color: var(--on-navy); border-radius: 10px; overflow: hidden; }
+  @media (max-width: 640px) { .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .strip div { padding: 14px 16px; display: grid; gap: 2px; border-right: 1px solid rgba(255,255,255,.12); }
+  .strip div:last-child { border-right: 0; }
+  @media (max-width: 640px) { .strip div:nth-child(2) { border-right: 0; } .strip div:nth-child(-n+2) { border-bottom: 1px solid rgba(255,255,255,.12); } }
+  .strip span { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; opacity: .72; font-weight: 600; }
+  .strip b { font-family: var(--f-display); font-style: italic; font-weight: 800; font-size: 32px; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .strip .amber { color: var(--amber); }
+
+  .tablebox { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; min-width: 760px; }
+  th { background: var(--navy); color: var(--on-navy); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; padding: 12px 12px; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; padding-left: 16px; }
+  th.plan { background: var(--teal); }
+  td { padding: 12px; text-align: right; border-top: 1px solid var(--line); font-weight: 500; }
+  td:first-child { font-weight: 600; }
+  tbody tr:nth-child(even) td { background: var(--surface-2); }
+  td.plan { font-weight: 600; }
+  td.plan small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+  tfoot td small { color: rgba(255,255,255,.75) !important; }
+  tfoot td { background: var(--navy) !important; color: var(--on-navy); font-weight: 600; border-top: 0; font-size: 16px; }
+  .pill { display: inline-block; min-width: 64px; text-align: center; padding: 3px 8px; border-radius: 99px; font-weight: 600; font-size: 14px; }
+  .pill.good { color: var(--good); background: var(--good-bg); }
+  .pill.warn { color: var(--warn); background: var(--warn-bg); }
+  .pill.bad { color: var(--bad); background: var(--bad-bg); }
+  .ahead { color: var(--good); font-weight: 600; }
+  .behind { color: var(--bad); font-weight: 600; }
+  tfoot .pill { background: rgba(255,255,255,.14); color: var(--on-navy); }
+  tfoot .ahead { color: #8ff0b4; } tfoot .behind { color: #ffb0b9; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--muted); align-items: center; }
+  .legend .pill { min-width: 0; font-size: 12px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button { font: inherit; font-weight: 600; font-size: 14px; background: var(--amber); color: #1a1300; border: 0; border-radius: 6px; padding: 9px 16px; cursor: pointer; }
+  button:hover { filter: brightness(.95); }
+  button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .editor { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 12px; }
+  .editor h2 { margin: 0; font-family: var(--f-display); font-style: italic; font-weight: 800; font-size: 24px; text-transform: uppercase; }
+  .editor p { margin: 0; font-size: 13px; color: var(--muted); }
+  .egrid { display: grid; grid-template-columns: minmax(110px, 1.4fr) minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px 10px; align-items: center; overflow-x: auto; }
+  .egrid .eh { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .egrid .en { font-weight: 600; }
+  .egrid .et { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .egrid input { font: inherit; font-size: 15px; font-variant-numeric: tabular-nums; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; width: 100%; min-width: 0; }
+  .egrid input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .egrid .eh:not(:first-child) { text-align: left; }
+  button.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  .erow-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .poster { display: grid; gap: 12px; }
+  .postbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; justify-content: space-between; }
+  .postbar h2 { margin: 0; font-family: var(--f-display); font-style: italic; font-weight: 800; font-size: 26px; text-transform: uppercase; }
+  .postbtns { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  a.btn { font: inherit; font-weight: 600; font-size: 14px; background: #1f9d55; color: #fff; border-radius: 6px; padding: 9px 16px; text-decoration: none; display: inline-block; }
+  a.btn:hover { filter: brightness(.95); }
+  a.btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .pwrap { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #eef3f6; }
+  .pwrap canvas { width: 100%; height: auto; display: block; }
+  #phint { margin: 0; font-size: 13px; color: var(--muted); }
+  #msg { font-size: 13px; color: var(--muted); }
+  #msg.err { color: var(--bad); }
+  textarea { position: absolute; left: -9999px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="brand">Birla Opus Paints &middot; Kerala RSM view</div>
+      <h1>Kerala Unit <span>Tracker</span></h1>
+    </div>
+    <div class="asof" id="asof"></div>
+  </header>
+
+  <section class="controls" aria-label="Upload and plan settings">
+    <div class="drops">
+      <label class="drop" id="drop" for="file">
+        <b>1. Sales Excel</b>
+        <small id="fname">Showing your latest KL.xlsx. Drop a newer file here or tap to choose.</small>
+        <input type="file" id="file" accept=".xlsx,.xlsm,.xls">
+      </label>
+    </div>
+    <div class="fields">
+      <label for="rdate">Report date<input type="date" id="rdate"></label>
+      <label for="pplan">Default plan (%)<input type="number" id="pplan" min="0" max="100" step="0.1"></label>
+      <label for="ptitle">Poster title<input type="text" id="ptitle" value="Kerala Sales" maxlength="24"></label>
+      <label for="pteam">Team name<input type="text" id="pteam" value="Team Kerala" maxlength="22"></label>
+      <label for="pclose">Closing on (optional)<input type="text" id="pclose" placeholder="e.g. 18th October" maxlength="24"></label>
+      <label for="ptime">Update time<input type="time" id="ptime"></label>
+      <p class="hint" id="planhint"></p>
+    </div>
+  </section>
+
+  <section class="editor" id="editor" aria-label="Plan for the day">
+    <h2>Plan for the day</h2>
+    <p id="ehint"></p>
+    <div class="egrid" id="egrid"></div>
+    <div class="erow-actions">
+      <button type="button" id="efill" class="ghost">Fill from default plan %</button>
+      <button type="button" id="eclear" class="ghost">Clear entries</button>
+      <span id="esaved" style="font-size:13px;color:var(--muted)"></span>
+    </div>
+  </section>
+
+  <section class="poster" aria-label="WhatsApp poster">
+    <div class="postbar">
+      <h2>WhatsApp poster</h2>
+      <div class="postbtns">
+        <button type="button" id="psave">Share / Save poster</button>
+        <a class="btn" id="wa" href="https://wa.me/" target="_blank" rel="noopener">Send text on WhatsApp</a>
+      </div>
+    </div>
+    <div class="pwrap"><canvas id="poster" width="1600" height="1200" aria-label="Sales tracker poster preview"></canvas></div>
+    <p id="phint">Upload the sales Excel, enter the plan for the day, and the poster rebuilds. Tap Share / Save poster and pick WhatsApp.</p>
+  </section>
+
+  <section class="strip" aria-label="Kerala total" id="strip"></section>
+
+  <section class="tablebox" aria-label="Unit-wise tracker">
+    <table>
+      <thead>
+        <tr>
+          <th>Unit (ASM)</th>
+          <th>MTD Target</th>
+          <th>MTD Achievement</th>
+          <th>Achievement %</th>
+          <th>Balance to Target</th>
+          <th class="plan">Plan for the Day</th>
+          <th class="plan">Balance to Plan</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+      <tfoot id="foot"></tfoot>
+    </table>
+  </section>
+
+  <div class="legend">
+    <span class="pill good">On plan</span> achievement % at or above plan %
+    <span class="pill warn">Close</span> within 10 points
+    <span class="pill bad">Behind</span> more than 10 points below
+  </div>
+
+  <div class="actions">
+    <button type="button" id="copy" class="ghost">Copy WhatsApp update</button>
+    <span id="msg" role="status"></span>
+  </div>
+  <textarea id="ta" aria-hidden="true" tabindex="-1"></textarea>
+</div>
+
+<script>
+(function () {
+  // Rows from the latest KL.xlsx (ASM sheet): name, MTD target, MTD GSR value.
+  var SAMPLE = [
+    ["Abhilash A", 730, 146.2707517],
+    ["Arun Krishnan", 460, 64.8850612],
+    ["Eldhose K J", 650, 98.4197099],
+    ["Harishankar G", 635, 105.9038064],
+    ["Haroon Sha", 325, 27.5002948],
+    ["John Joseph", 405.0035994216968, 71.0931868],
+    ["Salag Soman", 610, 93.1339665],
+    ["Tittoa C", 685, 88.4397991]
+  ];
+  var data = SAMPLE.map(function (r) { return { name: r[0], target: r[1], mtd: r[2] }; });
+  var sampleMode = true;
+  var manual = {}; // normalised unit name -> plan for the day, for the report date
+
+  var $ = function (id) { return document.getElementById(id); };
+  var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  function iso(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function parseISO(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function f1(n) { return n.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
+  function pct(n) { return (n * 100).toFixed(1) + "%"; }
+
+  function planFromDate() {
+    var d = parseISO($("rdate").value);
+    var dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    return { day: d.getDate(), dim: dim, p: d.getDate() / dim * 100 };
+  }
+
+  function setDate(d) {
+    $("rdate").value = iso(d);
+    syncPlan();
+  }
+  function syncPlan() {
+    var x = planFromDate();
+    $("pplan").value = x.p.toFixed(1);
+    loadManual();
+    render();
+    buildEditor();
+  }
+
+  function normName(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+  function planCell(v, today) { return f1(v) + (today != null ? "<small>today " + f1(today) + "</small>" : ""); }
+
+  function status(ach, plan) {
+    if (ach >= plan) return "good";
+    if (ach >= plan - 0.10) return "warn";
+    return "bad";
+  }
+
+  function compute() {
+    var plan = (parseFloat($("pplan").value) || 0) / 100;
+    var rows = data.map(function (r) {
+      var mv = manual[normName(r.name)], planVal = mv != null ? mv : r.target * plan;
+      return { name: r.name, target: r.target, mtd: r.mtd, ach: r.target ? r.mtd / r.target : 0,
+               balT: Math.max(r.target - r.mtd, 0), plan: planVal, today: null, balP: planVal - r.mtd };
+    });
+    var t = rows.reduce(function (a, r) {
+      a.target += r.target; a.mtd += r.mtd; a.plan += r.plan; a.today += r.today || 0; return a;
+    }, { target: 0, mtd: 0, plan: 0, today: 0 });
+    t.ach = t.target ? t.mtd / t.target : 0;
+    t.balT = Math.max(t.target - t.mtd, 0);
+    t.balP = t.plan - t.mtd;
+    t.hasToday = false;
+    plan = t.target ? t.plan / t.target : plan;
+    return { rows: rows, total: t, plan: plan };
+  }
+
+  function balCell(v) {
+    return v > 0 ? '<span class="behind">' + f1(v) + '</span>' : '<span class="ahead">Ahead ' + f1(-v) + '</span>';
+  }
+
+  function render() {
+    var c = compute();
+    var d = parseISO($("rdate").value), x = planFromDate();
+    $("asof").innerHTML = "Data as of <strong>" + d.getDate() + " " + MONTHS[d.getMonth()] + " " + d.getFullYear() + "</strong>";
+    var mc = data.filter(function (r) { return manual[normName(r.name)] != null; }).length;
+    $("planhint").textContent = mc
+      ? "Plan entered for " + mc + " of " + data.length + " units. The rest use the default plan %."
+      : "Day " + x.day + " of " + x.dim + " gives " + x.p.toFixed(1) + "%. Enter each unit's plan below to override it.";
+
+    $("strip").innerHTML =
+      '<div><span>Target</span><b>' + f1(c.total.target) + '</b></div>' +
+      '<div><span>MTD Achievement</span><b>' + f1(c.total.mtd) + '</b></div>' +
+      '<div><span>Achievement</span><b class="amber">' + pct(c.total.ach) + '</b></div>' +
+      '<div><span>Balance to Plan</span><b>' + (c.total.balP > 0 ? f1(c.total.balP) : 'Ahead ' + f1(-c.total.balP)) + '</b></div>';
+
+    $("rows").innerHTML = c.rows.map(function (r) {
+      return '<tr><td>' + esc(r.name) + '</td><td>' + f1(r.target) + '</td><td>' + f1(r.mtd) + '</td>' +
+        '<td><span class="pill ' + status(r.ach, c.plan) + '">' + pct(r.ach) + '</span></td>' +
+        '<td>' + f1(r.balT) + '</td><td class="plan">' + planCell(r.plan, r.today) + '</td><td>' + balCell(r.balP) + '</td></tr>';
+    }).join("");
+
+    schedulePoster(c);
+    var t = c.total;
+    $("foot").innerHTML = '<tr><td>Kerala total</td><td>' + f1(t.target) + '</td><td>' + f1(t.mtd) + '</td>' +
+      '<td><span class="pill">' + pct(t.ach) + '</span></td><td>' + f1(t.balT) + '</td><td class="plan">' + planCell(t.plan, t.hasToday ? t.today : null) + '</td><td>' + balCell(t.balP) + '</td></tr>';
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]; }); }
+
+  function norm(h) { return String(h == null ? "" : h).toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
+  function parseWorkbook(buf, name) {
+    var msg = $("msg"); msg.className = ""; msg.textContent = "";
+    try {
+      var wb = XLSX.read(buf, { type: "array" });
+      var sn = wb.SheetNames.filter(function (n) { return n.trim().toLowerCase() === "asm"; })[0] || wb.SheetNames[0];
+      var rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: null });
+      var hi = -1, ix = {};
+      for (var i = 0; i < Math.min(rows.length, 15); i++) {
+        var h = rows[i].map(norm);
+        var n = h.indexOf("asmname"), t = h.indexOf("mtdvaltarget"), m = h.indexOf("mtdgsrval");
+        if (n > -1 && t > -1 && m > -1) { hi = i; ix = { n: n, t: t, m: m }; break; }
+      }
+      if (hi < 0) throw new Error("Could not find the columns ASM NAME, MTD VAL TARGET and MTD GSR VAL on the ASM sheet.");
+      var out = [];
+      for (var k = hi + 1; k < rows.length; k++) {
+        var r = rows[k], nm = r[ix.n], tg = Number(r[ix.t]), mt = Number(r[ix.m]);
+        if (!nm || !String(nm).trim() || isNaN(tg) || isNaN(mt)) continue;
+        out.push({ name: String(nm).trim(), target: tg, mtd: mt });
+      }
+      if (!out.length) throw new Error("No unit rows found on the ASM sheet.");
+      data = out; sampleMode = false;
+      $("fname").textContent = name + " loaded. " + out.length + " units.";
+      setDate(new Date());
+    } catch (e) {
+      msg.className = "err"; msg.textContent = e.message || "Could not read that file.";
+    }
+  }
+
+  function readFile(f) {
+    if (!f) return;
+    var fr = new FileReader();
+    fr.onload = function () { parseWorkbook(new Uint8Array(fr.result), f.name); };
+    fr.onerror = function () { $("msg").className = "err"; $("msg").textContent = "Could not read that file."; };
+    fr.readAsArrayBuffer(f);
+  }
+
+  function mkey() { return "kl-plan-" + $("rdate").value; }
+  function loadManual() {
+    manual = {};
+    try { var sv = JSON.parse(localStorage.getItem(mkey()) || "null"); if (sv && typeof sv === "object") manual = sv; } catch (e) {}
+  }
+  function saveManual() {
+    try { localStorage.setItem(mkey(), JSON.stringify(manual)); $("esaved").textContent = "Saved on this device."; }
+    catch (e) { $("esaved").textContent = "Could not save on this device. Entries stay until you close the page."; }
+  }
+  function buildEditor() {
+    var c = compute(), x = planFromDate();
+    $("ehint").textContent = "Plan for " + x.day + " " + MONTHS[parseISO($("rdate").value).getMonth()] + ". Type each unit's plan for the day. A blank box uses the default plan % shown in grey.";
+    var h = '<div class="eh">Unit (ASM)</div><div class="eh">Month target</div><div class="eh">Plan for the day</div>';
+    c.rows.forEach(function (r, i) {
+      var mv = manual[normName(r.name)], def = r.target * (parseFloat($("pplan").value) || 0) / 100;
+      h += '<div class="en">' + esc(r.name) + '</div><div class="et">' + f1(r.target) + '</div>' +
+        '<input type="number" step="0.1" min="0" inputmode="decimal" data-i="' + i + '" id="ep' + i + '" aria-label="Plan for the day, ' + esc(r.name) + '" placeholder="' + (Math.round(def * 10) / 10) + '" value="' + (mv != null ? mv : "") + '">';
+    });
+    $("egrid").innerHTML = h;
+    $("esaved").textContent = "";
+  }
+  $("egrid").addEventListener("input", function (e) {
+    var el = e.target; if (!el.dataset || el.dataset.i == null) return;
+    var k = normName(data[+el.dataset.i].name), v = parseFloat(el.value);
+    if (el.value === "" || isNaN(v)) delete manual[k]; else manual[k] = Math.max(0, v);
+    saveManual(); render();
+  });
+  $("efill").addEventListener("click", function () {
+    var plan = (parseFloat($("pplan").value) || 0) / 100;
+    data.forEach(function (r) { manual[normName(r.name)] = Math.round(r.target * plan * 10) / 10; });
+    saveManual(); buildEditor(); render();
+  });
+  $("eclear").addEventListener("click", function () {
+    manual = {}; saveManual(); buildEditor(); render(); $("esaved").textContent = "Entries cleared. Using the default plan %.";
+  });
+
+  $("file").addEventListener("change", function (e) { readFile(e.target.files[0]); });
+  var drop = $("drop");
+  ["dragenter", "dragover"].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add("over"); }); });
+  ["dragleave", "drop"].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove("over"); }); });
+  drop.addEventListener("drop", function (e) { readFile(e.dataTransfer.files[0]); });
+
+  $("rdate").addEventListener("change", function () { if ($("rdate").value) syncPlan(); });
+  $("pplan").addEventListener("input", function () { render(); buildEditor(); });
+
+  function buildText() {
+    var c = compute(), d = parseISO($("rdate").value);
+    var lines = ["*Kerala Unit Tracker* - " + d.getDate() + " " + MONTHS[d.getMonth()],
+      "Plan till date: " + (c.plan * 100).toFixed(1) + "% of target", ""];
+    c.rows.forEach(function (r) {
+      lines.push(r.name + ": " + f1(r.mtd) + " / " + f1(r.target) + " (" + pct(r.ach) + ") | Plan " + f1(r.plan) + " | " + (r.balP > 0 ? "Bal to plan " + f1(r.balP) : "Ahead " + f1(-r.balP)));
+    });
+    var t = c.total;
+    lines.push("", "*Kerala*: " + f1(t.mtd) + " / " + f1(t.target) + " (" + pct(t.ach) + ") | Plan " + f1(t.plan) + " | " + (t.balP > 0 ? "Bal to plan " + f1(t.balP) : "Ahead " + f1(-t.balP)));
+    return lines.join("\n");
+  }
+
+  $("copy").addEventListener("click", function () {
+    var text = buildText(), msg = $("msg");
+    function fallback() {
+      var ta = $("ta"); ta.value = text; ta.select();
+      var ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+      msg.className = ok ? "" : "err"; msg.textContent = ok ? "Copied." : "Copy was blocked. Select the table and copy it manually.";
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { msg.className = ""; msg.textContent = "Copied."; }, fallback);
+    } else fallback();
+  });
+
+
+  /* ---------- Poster ---------- */
+  var FD = '"Barlow Condensed", "Arial Narrow", Arial, sans-serif';
+  var FB = '"Barlow", Arial, Helvetica, sans-serif';
+  var posterQueued = false, lastC = null;
+  function schedulePoster(c) {
+    lastC = c;
+    if (posterQueued) return;
+    posterQueued = true;
+    (window.requestAnimationFrame || setTimeout)(function () { posterQueued = false; try { drawPoster(lastC); } catch (e) {} });
+  }
+  function time12(v) {
+    var m = /^(\d{1,2}):(\d{2})/.exec(v || ""); if (!m) return "";
+    var h = +m[1], ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12;
+    return h + ":" + m[2] + " " + ap;
+  }
+
+  function drawPoster(c) {
+    var cv = $("poster"), g = cv.getContext("2d");
+    var n = c.rows.length, W = 1600, rowH = 70, headH = 98, totH = 86, tx = 40, tw = 1520;
+    var ty = 430, tEnd = ty + headH + n * rowH + totH;
+    var H = tEnd + 560;
+    cv.width = W; cv.height = H;
+
+    function txt(s, x, y, font, col, al) { g.font = font; g.fillStyle = col; g.textAlign = al || "left"; g.textBaseline = "middle"; g.fillText(s, x, y); }
+    function rr(x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+    function para(x, y, w, h, sk, fill) { g.beginPath(); g.moveTo(x + sk, y); g.lineTo(x + w, y); g.lineTo(x + w - sk, y + h); g.lineTo(x, y + h); g.closePath(); g.fillStyle = fill; g.fill(); }
+    function spaced(s) { return s.split("").join("  "); }
+
+    // background
+    var bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, "#eaf1f5"); bg.addColorStop(.5, "#f8f6f0"); bg.addColorStop(1, "#e9f0f4");
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    g.globalAlpha = .9;
+    g.fillStyle = "#1aa5a0"; g.beginPath(); g.moveTo(0, 150); g.lineTo(300, 96); g.lineTo(330, 122); g.lineTo(0, 196); g.fill();
+    g.fillStyle = "#e2262f"; g.beginPath(); g.moveTo(0, H - 250); g.lineTo(80, H - 300); g.lineTo(130, H - 270); g.lineTo(0, H - 190); g.fill();
+    g.fillStyle = "#f2a900"; g.beginPath(); g.moveTo(0, H - 120); g.lineTo(420, H - 190); g.lineTo(450, H - 150); g.lineTo(0, H - 40); g.fill();
+    g.fillStyle = "#f2a900"; g.beginPath(); g.moveTo(W, 90); g.lineTo(W - 220, 150); g.lineTo(W - 200, 175); g.lineTo(W, 130); g.fill();
+    g.globalAlpha = 1;
+
+    // brand block
+    txt(spaced("BIRLA"), 52, 70, "700 34px " + FB, "#0a1f4c");
+    txt("opus", 48, 130, "800 92px " + FB, "#0a1f4c");
+    var dots = [["#12876f", 300, 78], ["#f2a900", 292, 128], ["#6a2fa0", 338, 118]];
+    dots.forEach(function (d) { g.fillStyle = d[0]; g.beginPath(); g.arc(d[1], d[2], d[0] === "#12876f" ? 17 : 12, 0, 7); g.fill(); });
+    txt("PAINTS", 52, 186, "700 24px " + FB, "#44506b");
+    g.fillStyle = "rgba(10,31,76,.3)"; g.fillRect(388, 60, 2, 130);
+    txt("PAINT", 410, 82, "700 30px " + FB, "#0a1f4c"); txt("A BRIGHTER", 410, 118, "700 30px " + FB, "#0a1f4c"); txt("TOMORROW", 410, 154, "700 30px " + FB, "#0a1f4c");
+
+    // title
+    var words = (document.getElementById("ptitle").value.trim() || "Kerala Sales").toUpperCase().split(/\s+/);
+    var size = 124, widths, total, gap;
+    for (;;) {
+      g.font = "800 italic " + size + "px " + FD; gap = size * .24;
+      widths = words.map(function (w) { return g.measureText(w).width; });
+      total = widths.reduce(function (a, b) { return a + b; }, 0) + gap * (words.length - 1);
+      if (total <= 700 || size <= 56) break; size -= 4;
+    }
+    var x = 800 - total / 2, half = Math.ceil(words.length / 2);
+    words.forEach(function (w, i) {
+      txt(w, x, 128, "800 italic " + size + "px " + FD, i < half ? "#0a1f4c" : "#12876f"); x += widths[i] + gap;
+    });
+    txt(spaced("TRACKER"), 800, 222, "800 40px " + FB, "#0a1f4c", "center");
+    txt("PLAN  |  EXECUTE  |  ACHIEVE", 800, 268, "700 22px " + FB, "#44506b", "center");
+
+    // right block
+    txt("Stronger", 1500, 70, "800 italic 62px " + FD, "#12876f", "right");
+    txt("Together", 1500, 126, "800 italic 62px " + FD, "#12876f", "right");
+    g.fillStyle = "#f2a900"; g.fillRect(1290, 150, 210, 6);
+    ["BIGGER MARKETS", "BRIGHTER", "TOMORROWS"].forEach(function (l, i) { txt(l, 1500, 188 + i * 26, "700 21px " + FB, "#0a1f4c", "right"); });
+
+    // update tag
+    var tm = time12($("ptime").value), d = parseISO($("rdate").value);
+    var tag = "UPDATED" + (tm ? " · " + tm : "") + ", " + d.getDate() + " " + MONTHS[d.getMonth()].toUpperCase();
+    g.font = "700 20px " + FB; var tw2 = g.measureText(tag).width + 36;
+    g.fillStyle = "#d81f2e"; rr(W - 40 - tw2, 14, tw2, 34, 17); g.fill(); txt(tag, W - 40 - tw2 / 2, 32, "700 20px " + FB, "#fff", "center");
+
+    // banners
+    para(40, 310, 520, 104, 22, "#0a1f4c");
+    txt("PLAN TILL DATE =", 70, 346, "800 italic 38px " + FD, "#fff");
+    var pc = (c.plan * 100).toFixed(1) + "%";
+    g.font = "800 italic 38px " + FD; var pw = g.measureText("PLAN TILL DATE = ").width;
+    txt(pc, 70 + pw, 346, "800 italic 62px " + FD, "#f2a900");
+    txt("OF MONTHLY TARGET", 70, 390, "700 italic 30px " + FD, "#fff");
+
+    var closing = document.getElementById("pclose").value.trim().toUpperCase();
+    var lead = closing ? "CLOSING ON " : "UPDATE AS ON ";
+    var tail = closing || (d.getDate() + " " + ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"][d.getMonth()]);
+    para(590, 318, 560, 90, 22, "#12876f");
+    g.font = "700 italic 38px " + FD; var lw = g.measureText(lead).width;
+    g.font = "800 italic 50px " + FD; var tl = g.measureText(tail).width;
+    var sx = 870 - (lw + tl) / 2;
+    txt(lead, sx, 364, "700 italic 38px " + FD, "#fff"); txt(tail, sx + lw, 364, "800 italic 50px " + FD, "#f2a900");
+
+    g.save(); g.translate(1380, 366); g.rotate(-.04);
+    para(-150, -46, 300, 92, 18, "#f2a900");
+    txt("SAME TEAM", 0, -14, "800 italic 34px " + FD, "#0a1f4c", "center"); txt("BIGGER HEIGHTS", 0, 20, "800 italic 34px " + FD, "#0a1f4c", "center");
+    g.restore();
+
+    // table
+    var cols = [
+      { w: 300, h: ["UNIT", "(ASM)"], hc: "#0a1f4c", bg: ["#ffffff", "#f4f2fb"] },
+      { w: 170, h: ["MTD", "TARGET"], hc: "#5b2d8e", bg: ["#ece3f7", "#e6dbf4"] },
+      { w: 210, h: ["MTD", "ACHIEVEMENT"], hc: "#1f6fd6", bg: ["#dbe9fb", "#d2e3f9"] },
+      { w: 190, h: ["ACHIEVEMENT", "%"], hc: "#d81f2e", bg: ["#fbdcdc", "#f8d2d3"] },
+      { w: 210, h: ["BALANCE TO", "TARGET"], hc: "#e8622c", bg: ["#fbe4d8", "#f8dccd"] },
+      { w: 230, h: ["PLAN FOR", "THE DAY"], hc: "#12876f", bg: ["#e0f3ec", "#d6eee5"] },
+      { w: 210, h: ["BALANCE", "TO PLAN"], hc: "#0d6b58", bg: ["#d6eee5", "#cce8de"] }
+    ];
+    var sum = cols.reduce(function (a, k) { return a + k.w; }, 0), sc = tw / sum, xs = [], cx = tx;
+    cols.forEach(function (k) { k.w *= sc; xs.push(cx); cx += k.w; });
+
+    g.save(); g.shadowColor = "rgba(10,31,76,.25)"; g.shadowBlur = 24; g.shadowOffsetY = 8; rr(tx, ty, tw, tEnd - ty, 16); g.fillStyle = "#fff"; g.fill(); g.restore();
+    g.save(); rr(tx, ty, tw, tEnd - ty, 16); g.clip();
+    cols.forEach(function (k, i) {
+      g.fillStyle = k.hc; g.fillRect(xs[i], ty, k.w, headH);
+      var mid = i === 0 ? xs[i] + 28 : xs[i] + k.w / 2, al = i === 0 ? "left" : "center";
+      txt(k.h[0], mid, ty + 36, "700 27px " + FB, "#fff", al); txt(k.h[1], mid, ty + 68, "700 27px " + FB, "#fff", al);
+    });
+    c.rows.forEach(function (r, ri) {
+      var y = ty + headH + ri * rowH, odd = ri % 2, cy = y + rowH / 2;
+      cols.forEach(function (k, i) { g.fillStyle = k.bg[odd]; g.fillRect(xs[i], y, k.w, rowH); });
+      g.fillStyle = "rgba(10,31,76,.08)"; g.fillRect(tx, y, tw, 1);
+      var mid = function (i) { return xs[i] + cols[i].w / 2; };
+      var st = status(r.ach, c.plan), acol = st === "good" ? "#128a3e" : st === "warn" ? "#c27a00" : "#d81f2e";
+      txt(r.name, xs[0] + 28, cy, "700 32px " + FB, "#0a1f4c");
+      txt(f1(r.target), mid(1), cy, "700 32px " + FB, "#1a1a2e", "center");
+      txt(f1(r.mtd), mid(2), cy, "700 32px " + FB, "#1a1a2e", "center");
+      txt(pct(r.ach), mid(3), cy, "700 32px " + FB, acol, "center");
+      txt(f1(r.balT), mid(4), cy, "700 32px " + FB, "#c14d1a", "center");
+      if (r.today != null) { txt(f1(r.plan), mid(5), cy - 9, "700 32px " + FB, "#0d6b58", "center"); txt("today " + f1(r.today), mid(5), cy + 20, "500 19px " + FB, "#5c6a86", "center"); }
+      else txt(f1(r.plan), mid(5), cy, "700 32px " + FB, "#0d6b58", "center");
+      if (r.balP > 0) txt(f1(r.balP), mid(6), cy, "700 32px " + FB, "#c4162a", "center");
+      else txt("Ahead " + f1(-r.balP), mid(6), cy, "700 30px " + FB, "#128a3e", "center");
+    });
+    var ty2 = ty + headH + n * rowH, t = c.total, tcy = ty2 + totH / 2;
+    g.fillStyle = "#0a1f4c"; g.fillRect(tx, ty2, xs[1] - tx, totH);
+    var tcol = ["#0a1f4c", "#7a45c0", "#2f84f0", "#e8323f", "#f27a3d", "#18a187", "#0d8a72"];
+    cols.forEach(function (k, i) { if (i) { g.fillStyle = tcol[i]; g.fillRect(xs[i], ty2, k.w, totH); } });
+    txt("KERALA TOTAL", xs[0] + 28, tcy, "800 34px " + FB, "#fff");
+    var tm2 = function (i) { return xs[i] + cols[i].w / 2; };
+    txt(f1(t.target), tm2(1), tcy, "800 36px " + FB, "#fff", "center");
+    txt(f1(t.mtd), tm2(2), tcy, "800 36px " + FB, "#fff", "center");
+    txt(pct(t.ach), tm2(3), tcy, "800 36px " + FB, "#fff", "center");
+    txt(f1(t.balT), tm2(4), tcy, "800 36px " + FB, "#fff", "center");
+    if (t.hasToday) { txt(f1(t.plan), tm2(5), tcy - 10, "800 36px " + FB, "#fff", "center"); txt("today " + f1(t.today), tm2(5), tcy + 22, "500 19px " + FB, "rgba(255,255,255,.85)", "center"); }
+    else txt(f1(t.plan), tm2(5), tcy, "800 36px " + FB, "#fff", "center");
+    txt(t.balP > 0 ? f1(t.balP) : "Ahead " + f1(-t.balP), tm2(6), tcy, "800 34px " + FB, "#fff", "center");
+    g.restore();
+
+    // footer values row
+    var fy = tEnd + 100;
+    var items = [["CLEAR PLAN", "BIGGER RESULTS", "#0a1f4c", "target"], ["TRACK PROGRESS", "DRIVE GROWTH", "#12876f", "bars"], ["ONE TEAM", "ONE GOAL", "#12876f", "team"], ["MAKE", "IT HAPPEN", "#f2a900", "star"]];
+    items.forEach(function (it, i) {
+      var ix = 130 + i * 380;
+      g.fillStyle = it[2]; g.beginPath(); g.arc(ix, fy, 36, 0, 7); g.fill();
+      g.strokeStyle = "#fff"; g.fillStyle = "#fff"; g.lineWidth = 4;
+      if (it[3] === "target") { [22, 14, 6].forEach(function (rad) { g.beginPath(); g.arc(ix, fy, rad, 0, 7); g.stroke(); }); }
+      if (it[3] === "bars") { g.fillRect(ix - 20, fy + 2, 11, 16); g.fillRect(ix - 5, fy - 8, 11, 26); g.fillRect(ix + 10, fy - 20, 11, 38); }
+      if (it[3] === "team") { [[-14, 4], [0, -2], [14, 4]].forEach(function (p) { g.beginPath(); g.arc(ix + p[0], fy + p[1] - 8, 7, 0, 7); g.fill(); g.beginPath(); g.arc(ix + p[0], fy + p[1] + 14, 11, Math.PI, 0); g.fill(); }); }
+      if (it[3] === "star") { g.beginPath(); for (var k = 0; k < 10; k++) { var ang = -Math.PI / 2 + k * Math.PI / 5, rad = k % 2 ? 9 : 22; g.lineTo(ix + Math.cos(ang) * rad, fy + 2 + Math.sin(ang) * rad); } g.closePath(); g.fill(); }
+      txt(it[0], ix + 56, fy - 14, "700 25px " + FB, "#0a1f4c"); txt(it[1], ix + 56, fy + 16, "700 25px " + FB, "#0a1f4c");
+      if (i < 3) { g.fillStyle = "rgba(10,31,76,.2)"; g.fillRect(ix + 330, fy - 28, 2, 56); }
+    });
+
+    // bottom banner
+    var by = fy + 100;
+    txt("Let's Colour", 60, by + 40, "800 italic 52px " + FD, "#0a1f4c");
+    txt("More Possibilities", 60, by + 96, "800 italic 52px " + FD, "#0a1f4c");
+    para(450, by, 700, 170, 28, "#0a1f4c");
+    g.fillStyle = "#f2a900"; g.beginPath(); g.moveTo(780, by + 36); g.lineTo(790, by + 14); g.lineTo(800, by + 30); g.lineTo(810, by + 14); g.lineTo(820, by + 36); g.closePath(); g.fill();
+    var team = (document.getElementById("pteam").value.trim() || "Team Kerala");
+    var ts = 92; g.font = "800 italic " + ts + "px " + FD; while (g.measureText(team).width > 560 && ts > 40) { ts -= 4; g.font = "800 italic " + ts + "px " + FD; }
+    txt(team, 800, by + 92, "800 italic " + ts + "px " + FD, "#fff", "center");
+    txt(spaced("KERALA REGION"), 800, by + 142, "700 22px " + FB, "#e8cd8a", "center");
+    txt("From Kerala", 1540, by + 36, "800 italic 46px " + FD, "#0a1f4c", "right");
+    txt("to Greater", 1540, by + 86, "800 italic 46px " + FD, "#0a1f4c", "right");
+    txt("Heights", 1540, by + 136, "800 italic 46px " + FD, "#0a1f4c", "right");
+
+    // trim canvas height to content
+    var finalH = by + 220;
+    if (finalH < H) { var img = g.getImageData(0, 0, W, finalH); cv.height = finalH; g.putImageData(img, 0, 0); }
+
+    var wa = $("wa"); wa.href = "https://wa.me/?text=" + encodeURIComponent(buildText());
+  }
+
+  if (document.fonts && document.fonts.load) {
+    Promise.all([document.fonts.load('800 italic 60px "Barlow Condensed"'), document.fonts.load('700 30px "Barlow"'), document.fonts.load('800 30px "Barlow"')])
+      .then(function () { render(); }, function () {});
+  }
+
+  // Standalone version: share the PNG through the phone's share sheet when available, otherwise download it.
+  $("psave").addEventListener("click", function () {
+    var msg = $("msg"); msg.className = ""; msg.textContent = "";
+    var d = parseISO($("rdate").value), fn = "Kerala_Sales_Tracker_" + d.getDate() + MONTHS[d.getMonth()] + ".png";
+    $("poster").toBlob(function (blob) {
+      if (!blob) { msg.className = "err"; msg.textContent = "Could not create the image."; return; }
+      var file = null;
+      try { file = new File([blob], fn, { type: "image/png" }); } catch (e) {}
+      if (file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+        navigator.share({ files: [file], title: "Kerala Sales Tracker" }).catch(function () {});
+        return;
+      }
+      var url = URL.createObjectURL(blob), a = document.createElement("a");
+      a.href = url; a.download = fn; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+      msg.textContent = "Poster saved. Attach it in WhatsApp.";
+    }, "image/png");
+  });
+  ["ptitle", "pteam", "pclose", "ptime"].forEach(function (id) { $(id).addEventListener("input", render); });
+  (function () { var n = new Date(); $("ptime").value = String(n.getHours()).padStart(2, "0") + ":" + String(n.getMinutes()).padStart(2, "0"); })();
+
+  setDate(new Date());
+})();
+</script>
+
+</body>
+</html>
